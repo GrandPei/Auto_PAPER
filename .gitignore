@@ -1,1 +1,12 @@
 API_key/API_key.json
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# IDE settings
+.idea/
+.vscode/
+
+# Code review cache
+.review_cache/
