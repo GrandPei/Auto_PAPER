@@ -123,6 +123,7 @@ def _try_semantic_scholar(title: str) -> str:
         resp = requests.get(
             "https://api.semanticscholar.org/graph/v1/paper/search",
             params={"query": title, "limit": 3, "fields": "title,openAccessPdf,isOpenAccess"},
+            headers=_HEADERS,
             timeout=15,
         )
         data = resp.json()
@@ -167,15 +168,35 @@ def _try_arxiv(title: str) -> str:
     return ""
 
 
-def _do_download(pdf_url: str, file_path: str) -> Tuple[bool, str]:
-    """执行 PDF 下载并校验。"""
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/pdf,text/html,*/*",
+}
+
+
+def _do_download(pdf_url: str, file_path: str, referer: str = "") -> Tuple[bool, str]:
+    """执行 PDF 下载并校验，使用 Session 模拟浏览器访问。"""
+    session = requests.Session()
+    session.headers.update(_HEADERS)
+
+    # 若有 referer，先访问来源页面获取 cookie
+    if referer:
+        try:
+            session.get(referer, timeout=15)
+        except Exception:
+            pass
+
     try:
         print(f"  下载: {pdf_url[:100]}...")
-        resp = requests.get(pdf_url, timeout=60, stream=True)
+        req_headers = {}
+        if referer:
+            req_headers["Referer"] = referer
+
+        resp = session.get(pdf_url, headers=req_headers, timeout=60, stream=True)
         resp.raise_for_status()
 
         content_type = resp.headers.get("Content-Type", "")
-        if "text/html" in content_type:
+        if "text/html" in content_type and "application/pdf" not in content_type:
             return (False, f"下载链接返回网页而非 PDF: {pdf_url}")
 
         with open(file_path, "wb") as f:
@@ -190,6 +211,8 @@ def _do_download(pdf_url: str, file_path: str) -> Tuple[bool, str]:
         return (True, file_path)
     except requests.exceptions.RequestException as e:
         return (False, f"下载失败: {e}")
+    finally:
+        session.close()
 
 
 def download_paper_pdf(
@@ -216,6 +239,7 @@ def download_paper_pdf(
     file_path = os.path.join(save_dir, f"{safe_title}.pdf")
 
     pdf_url = ""
+    referer = ""
 
     # ── Channel 1: Google Scholar ──────────────────────────────
     api_key = key_get("serpapi")
@@ -236,9 +260,9 @@ def download_paper_pdf(
                 matched_title = paper.get("title", "")
                 similarity = SequenceMatcher(None, paper_title.lower(), matched_title.lower()).ratio()
 
-                # 仅当标题匹配时才从此渠道获取 PDF
                 if similarity >= 0.6:
                     print(f"  [Google Scholar] 匹配: {matched_title[:70]} ({similarity:.2f})")
+                    referer = paper.get("link", "")
 
                     for res in paper.get("resources", []):
                         if res.get("file_format", "").upper() == "PDF":
@@ -271,14 +295,14 @@ def download_paper_pdf(
         return (False, f"所有渠道均未找到可下载的 PDF: '{paper_title[:80]}'")
 
     # ── 下载 ───────────────────────────────────────────────────
-    return _do_download(pdf_url, file_path)
+    return _do_download(pdf_url, file_path, referer=referer)
 
 
 # ── 命令行演示 ─────────────────────────────────────────────────────
 if __name__ == "__main__":
     # 测试 PDF 下载
     print("=== PDF 下载测试 ===\n")
-    ok, path = download_paper_pdf("A Baseline Analysis of Reward Models’ Ability To Accurately Analyze Foundation Models Under Distribution Shift")
+    ok, path = download_paper_pdf("Graph Attention Site Prediction (GrASP): Identifying Druggab")
     if ok:
         print(f"✓ 下载成功: {path}")
     else:

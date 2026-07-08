@@ -10,3 +10,18 @@ __pycache__/
 
 # Code review cache
 .review_cache/
+
+# Environment
+.env
+
+# Virtual environment
+.venv/
+venv/
+
+# Distribution
+dist/
+*.egg-info/
+
+# OS files
+.DS_Store
+Thumbs.db

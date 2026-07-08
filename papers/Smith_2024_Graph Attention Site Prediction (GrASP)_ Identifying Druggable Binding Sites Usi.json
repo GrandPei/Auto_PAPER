@@ -1,0 +1,38 @@
+{
+  "title": "Graph Attention Site Prediction (GrASP): Identifying Druggable Binding Sites Using Graph Neural Networks with Attention",
+  "authors": [
+    {
+      "name": "Zachary Smith",
+      "orcid": "https://orcid.org/0000-0003-0844-7942",
+      "affiliation": "University of Maryland, College Park"
+    },
+    {
+      "name": "Michael Strobel",
+      "orcid": "https://orcid.org/0009-0000-3829-0048",
+      "affiliation": "University of Maryland, College Park"
+    },
+    {
+      "name": "Bodhi P. Vani",
+      "orcid": "https://orcid.org/0000-0002-7747-279X",
+      "affiliation": "University of Maryland, College Park"
+    },
+    {
+      "name": "Pratyush Tiwary",
+      "orcid": "https://orcid.org/0000-0002-2412-6922",
+      "affiliation": "University of Maryland, College Park"
+    }
+  ],
+  "abstract": "",
+  "year": 2024,
+  "venue": "Journal of Chemical Information and Modeling",
+  "doi": "10.1021/acs.jcim.3c01698",
+  "url": "https://openalex.org/W4392626944",
+  "pdf_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11182664/pdf/nihms-1996964.pdf",
+  "pdf_path": "papers\\Smith_2024_Graph Attention Site Prediction (GrASP)_ Identifying Druggable Binding Sites Usi.pdf",
+  "provider": "openalex",
+  "citation_count": 34,
+  "open_access": true,
+  "license": null,
+  "sha256": "f663aeeb0388b6baf2c34ac4cc8b23d35ed3a8bde7e637cf82b94a6c748f0220",
+  "downloaded_at": "2026-07-08T13:20:36.054253"
+}
