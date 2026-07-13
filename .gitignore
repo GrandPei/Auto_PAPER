@@ -1,27 +1,57 @@
+# ── 密钥 ────────────────────────────────────────────────────────
 API_key/API_key.json
 
-# Python bytecode cache
+# ── Python 字节码缓存 ────────────────────────────────────────────
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+*.egg
+.eggs/
 
-# IDE settings
-.idea/
-.vscode/
-
-# Code review cache
-.review_cache/
-
-# Environment
+# ── 环境变量 ─────────────────────────────────────────────────────
 .env
 
-# Virtual environment
+# ── 虚拟环境 ─────────────────────────────────────────────────────
 .venv/
 venv/
+env/
 
-# Distribution
+# ── IDE & 编辑器 ─────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── paper_downloader 运行时目录 ───────────────────────────────────
+papers/
+papers_data/
+logs/
+cache/
+
+# ── 下载历史 ─────────────────────────────────────────────────────
+download_history.json
+download_report_*.json
+download_report_*.csv
+download_report_*.md
+
+# ── 测试 ─────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.coverage.*
+
+# ── 代码审查 ─────────────────────────────────────────────────────
+.review_cache/
+.cursor/
+.claude/
+
+# ── 分发包 ───────────────────────────────────────────────────────
 dist/
-*.egg-info/
+build/
 
-# OS files
+# ── 操作系统 ─────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini

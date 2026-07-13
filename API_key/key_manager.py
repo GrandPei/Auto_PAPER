@@ -68,7 +68,7 @@ def verify_keys() -> bool:
         with open(_JSON_PATH, "w", encoding="utf-8") as f:
             json.dump(template, f, ensure_ascii=False, indent=2)
         _cache = None
-        print(f"[key_manager] 已创建 API_key.json 模板，请填入所需 Key:")
+        print(f"[密钥管理器] 已创建 API_key.json 模板，请填入所需 Key:")
         print(f"              {_JSON_PATH}")
         for k in REQUIRED_KEYS:
             print(f"              - {k}: \"\"")
@@ -78,7 +78,7 @@ def verify_keys() -> bool:
     missing = [k for k in REQUIRED_KEYS if k not in keys or not keys[k]]
 
     if missing:
-        print(f"[key_manager] ⚠ API_key.json 缺少以下 Key: {', '.join(missing)}")
+        print(f"[密钥管理器] ⚠ API_key.json 缺少以下 Key: {', '.join(missing)}")
         return False
 
     return True

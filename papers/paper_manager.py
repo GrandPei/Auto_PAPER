@@ -6,11 +6,19 @@ paper_manager.py — 文献管理器
 
 import json
 import os
+import re
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Optional
 
 _JSON_PATH = os.path.join(os.path.dirname(__file__), "papers_list.json")
 
+# 文件名非法字符（与 paper_downloader.storage.file_store 保持一致）
+_ILLEGAL_CHARS = r'[<>:"/\\|?*\x00-\x1f]'
+
+# papers 数据根目录，默认为 papers/ 同级的 papers_data/
+_PAPERS_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "papers_data")
 
 def _load() -> dict:
     if not os.path.exists(_JSON_PATH):
@@ -148,6 +156,160 @@ def export_all_bibtex() -> str:
     """导出全部文献的 BibTeX。"""
     return "\n\n".join(
         export_bibtex(p["title"]) for p in list_all()
+    )
+
+
+# ── 包装 ────────────────────────────────────────────────────────
+
+
+
+def _sanitize_name(name: str, max_len: int = 200) -> str:
+    """净化文件夹名称，替换非法字符。"""
+    sanitized = re.sub(_ILLEGAL_CHARS, "_", name)
+    sanitized = re.sub(r"_+", "_", sanitized)
+    sanitized = sanitized.strip("_ .")
+    if len(sanitized) > max_len:
+        sanitized = sanitized[:max_len]
+    return sanitized
+
+
+def _make_folder_name(title: str, authors: str = "", year: str = "") -> str:
+    """生成规范的论文文件夹名：{第一作者姓氏}_{年份}_{标题}。"""
+    # 提取第一作者姓氏
+    first_author = "unknown"
+    if authors:
+        # 支持 "John Smith" 或 "Smith, John" 两种格式
+        first_name = authors.split(",")[0].strip() if "," in authors else authors.split(";")[0].strip()
+        parts = first_name.split()
+        first_author = parts[-1] if parts else first_name
+
+    year_str = str(year) if year else "nodate"
+    title_part = title[:80] if title else "untitled"
+
+    raw = f"{first_author}_{year_str}_{title_part}"
+    return _sanitize_name(raw)
+
+
+def wrap_paper(
+    title: str,
+    *,
+    authors: str = "",
+    year: str = "",
+    pdf_path: str | Path | None = None,
+    base_dir: str | Path | None = None,
+    register: bool = True,
+) -> Optional[str]:
+    """将下载的论文文件包装成一个独立文件夹，便于存储管理。
+
+    将 PDF 及同名的元数据文件（.json / .bib / .ris）移入
+    以 ``{第一作者}_{年份}_{标题}`` 命名的文件夹中，
+    并可选地注册到 ``papers_list.json``。
+
+    Args:
+        title:     论文标题（必填）。
+        authors:   作者字符串，如 ``"John Smith; Jane Doe"``。
+        year:      发表年份。
+        pdf_path:  PDF 文件的本地路径。若为 None，则只创建空文件夹。
+        base_dir:  存放文件夹的根目录。默认为 ``papers_data/``。
+        register:  是否自动注册到文献库。默认 True。
+
+    Returns:
+        创建好的文件夹路径，失败时返回 None。
+
+    Example::
+
+        >>> wrap_paper(
+        ...     title="Attention Is All You Need",
+        ...     authors="Ashish Vaswani; Noam Shazeer",
+        ...     year="2017",
+        ...     pdf_path="/downloads/Vaswani_2017_Attention_Is_All_You_Need.pdf",
+        ... )
+        'papers_data/Vaswani_2017_Attention_Is_All_You_Need'
+    """
+    # ---- 确定目标根目录 ----
+    root = Path(base_dir) if base_dir else Path(_PAPERS_DATA_DIR).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+
+    # ---- 生成文件夹名 ----
+    folder_name = _make_folder_name(title, authors, year)
+    folder_path = root / folder_name
+
+    # 处理重名：追加数字后缀
+    if folder_path.exists():
+        counter = 1
+        while (root / f"{folder_name}_{counter}").exists():
+            counter += 1
+        folder_path = root / f"{folder_name}_{counter}"
+
+    folder_path.mkdir(parents=True, exist_ok=True)
+
+    # ---- 移动文件 ----
+    pdf_src = Path(pdf_path) if pdf_path else None
+    moved_files: list[str] = []
+
+    if pdf_src and pdf_src.exists():
+        dest = folder_path / pdf_src.name
+        shutil.move(str(pdf_src), str(dest))
+        moved_files.append(str(dest))
+    elif pdf_src:
+        # PDF 路径已记录但文件不存在 —— 仍然记录但不移动
+        pass
+
+    # 同时移动同名的元数据文件（.json / .bib / .ris）
+    if pdf_src:
+        stem = pdf_src.stem  # 不含扩展名的文件名
+        parent = pdf_src.parent
+        for ext in (".json", ".bib", ".ris"):
+            sidecar = parent / f"{stem}{ext}"
+            if sidecar.exists():
+                dest = folder_path / sidecar.name
+                shutil.move(str(sidecar), str(dest))
+                moved_files.append(str(dest))
+
+    # ---- 注册到文献库 ----
+    if register:
+        record = {
+            "title":    title,
+            "authors":  authors,
+            "year":     str(year) if year else "",
+            "file_path": str(folder_path),
+            "tags":     [],
+            "notes":    "",
+            "downloaded_at": datetime.now().strftime("%Y-%m-%d"),
+        }
+        add(record)
+
+    return str(folder_path)
+
+
+def wrap_from_download_result(
+    result,
+    *,
+    base_dir: str | Path | None = None,
+    register: bool = True,
+) -> Optional[str]:
+    """直接从 ``paper_downloader`` 的 DownloadResult 包装论文。
+
+    这是 ``wrap_paper`` 的便捷封装，自动从 DownloadResult
+    中提取标题、作者、年份和 PDF 路径。
+
+    Args:
+        result:    paper_downloader 返回的 DownloadResult 对象。
+        base_dir:  存放文件夹的根目录。默认为 ``papers_data/``。
+        register:  是否自动注册到文献库。默认 True。
+
+    Returns:
+        创建好的文件夹路径，失败时返回 None。
+    """
+    paper = result.paper
+    authors_str = "; ".join(a.name for a in paper.authors)
+    return wrap_paper(
+        title=paper.title,
+        authors=authors_str,
+        year=str(paper.year) if paper.year else "",
+        pdf_path=paper.pdf_path or result.pdf_path,
+        base_dir=base_dir,
+        register=register,
     )
 
 
