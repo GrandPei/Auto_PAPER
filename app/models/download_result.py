@@ -40,7 +40,33 @@ class DownloadResult(BaseModel):
 
     source_channel: str = Field(
         default="",
-        description="最终成功的下载渠道: google_scholar | semantic_scholar | arxiv",
+        description="最终成功的下载渠道: arxiv | openalex | semantic_scholar | crossref | ...",
+    )
+
+    status: str = Field(
+        default="",
+        description="结构化下载状态，如 success_valid_pdf / title_mismatch / not_found",
+    )
+
+    file_size: int = Field(
+        default=0,
+        ge=0,
+        description="下载文件大小（字节）",
+    )
+
+    page_count: int | None = Field(
+        default=None,
+        description="PDF 页数，无法读取时为空",
+    )
+
+    doi: str = Field(
+        default="",
+        description="下载到的论文 DOI",
+    )
+
+    arxiv_id: str = Field(
+        default="",
+        description="下载到的论文 arXiv ID",
     )
 
 
