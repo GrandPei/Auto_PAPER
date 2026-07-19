@@ -75,9 +75,15 @@ from paper_downloader.src.search_engines.base_search import SearchEngine
 # 配置管理
 from paper_downloader.src.config.config_manager import ConfigManager
 
-# 缓存
-from paper_downloader.src.cache.cache_manager import CacheManager
-from paper_downloader.src.cache.cache_decorator import cached
+# 缓存（当前源码包可能未包含 cache 子模块，保持可选）
+try:
+    from paper_downloader.src.cache.cache_manager import CacheManager
+    from paper_downloader.src.cache.cache_decorator import cached
+except ImportError:
+    CacheManager = None  # type: ignore[assignment]
+
+    def cached(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise ImportError("paper_downloader.src.cache is not available in this source tree")
 
 # 下载管理
 from paper_downloader.src.downloaders.download_manager import DownloadManager
