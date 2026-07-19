@@ -1,23 +1,17 @@
-"""
-download.py — 论文 PDF 下载服务
+"""download.py — competition-facing PDF download service.
 
-基于 PaperDownloader 企业级下载引擎：
-  - 5 个 Provider 级联（OpenAlex → Semantic Scholar → arXiv → CrossRef → Unpaywall）
-  - 智能标题匹配（RapidFuzz + Levenshtein）
-  - 流式下载 + 进度条 + SHA256 校验
-  - SQLite 缓存去重
-  - JSON / BibTeX 元数据自动保存
-
-支持:
-  - 单篇 / 批量异步下载
-  - 失败自动重试（指数退避）
-  - 结构化 BatchDownloadResult 状态返回
+This service integrates the validated ``paper_downloader`` academic OA mode
+into the main AutoPaper app. It focuses on legal PDF acquisition and validation:
+arXiv, OpenAlex, Semantic Scholar, and CrossRef are tried as academic sources;
+Google Scholar is intentionally excluded from the default app path.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
+from typing import Any
 
 from app.core.config import settings
 from app.models.download_result import BatchDownloadResult as AutoBatchResult
@@ -32,17 +26,18 @@ class DownloadError(Exception):
 
 
 class PaperDownloader:
-    """论文 PDF 下载器 — 基于 PaperDownloader 引擎。
+    """论文 PDF 下载器 — 面向赛题主项目的下载服务。
 
-    底层使用 5 个 Provider 级联搜索 + 下载，相比旧版 Google Scholar 方案：
-      - 不再依赖 SerpAPI 付费 API
-      - 覆盖 OpenAlex、Semantic Scholar、arXiv、CrossRef、Unpaywall
-      - 自动缓存，避免重复下载
+    默认使用 ``academic_oa``：
+      - arXiv
+      - OpenAlex
+      - Semantic Scholar
+      - CrossRef
 
     用法::
 
         downloader = PaperDownloader()
-        result = await downloader.download_one("Attention Is All You Need")
+        result = await downloader.download_one("PaSa: An LLM Agent for Comprehensive Academic Paper Search")
         if result.success:
             print(f"已保存至: {result.file_path}")
     """
@@ -51,23 +46,27 @@ class PaperDownloader:
         self,
         save_dir: str | None = None,
         max_retries: int = 3,
+        engine: str = "academic_oa",
+        timeout: int = 45,
     ):
         """初始化下载器。
 
         Args:
             save_dir: 保存目录，默认从 settings.download_dir 读取。
             max_retries: 单篇下载最大重试次数。
+            engine: paper_downloader 极简接口的引擎模式，默认 academic_oa。
+            timeout: 单次搜索/下载超时基准秒数。
         """
         self.save_dir = save_dir or str(settings.download_dir)
         self.max_retries = max_retries
+        self.engine = engine
+        self.timeout = timeout
         os.makedirs(self.save_dir, exist_ok=True)
-
-        # 延迟导入，确保 paper_downloader 已安装
-        from paper_downloader.config import get_settings as _get_pd_settings
-
-        _pd_settings = _get_pd_settings()
-        _pd_settings.download_dir = self.save_dir
-        logger.info("PaperDownloader 引擎初始化完成，保存目录: %s", self.save_dir)
+        logger.info(
+            "PaperDownloader 下载服务初始化完成，保存目录: %s, engine=%s",
+            self.save_dir,
+            self.engine,
+        )
 
     # ── 公开方法 ────────────────────────────────────────────────
 
@@ -114,6 +113,7 @@ class PaperDownloader:
             success=False,
             error=last_error,
             retries_used=self.max_retries,
+            status="failed_after_retries",
         )
 
     async def download_batch(
@@ -158,39 +158,84 @@ class PaperDownloader:
             results=list(results),
         )
 
-    # ── 核心下载逻辑 — 委托给 PaperDownloader 引擎 ─────────────
+    # ── 核心下载逻辑 — 委托给 paper_downloader academic_oa ─────
 
     async def _async_download(self, paper_title: str) -> AutoDownloadResult:
-        """异步执行 PaperDownloader API 下载。
+        """异步执行合法开放全文下载，并映射为主项目下载结果。"""
+        return await asyncio.to_thread(self._download_sync, paper_title)
 
-        流程:
-          1. 调用 download_paper_pdf(title) → 自动搜索 + 下载 + SHA256 校验
-          2. 映射到 AutoPaper 的 DownloadResult 结构
+    def _download_sync(self, paper_title: str) -> AutoDownloadResult:
+        from paper_downloader.src.downloaders.base_downloader import Downloader
+        from paper_downloader.src.downloaders.pdf_processor import PDFProcessor
+        from paper_downloader.src.interface import download_pdf
 
-        Args:
-            paper_title: 论文标题。
+        raw = download_pdf(
+            title=paper_title,
+            output_dir=self.save_dir,
+            engine=self.engine,
+            timeout=self.timeout,
+            rename=True,
+        )
 
-        Returns:
-            AutoDownloadResult
-        """
-        from paper_downloader import download_paper_pdf
-        from paper_downloader.models import DownloadStatus
+        paper_info: dict[str, Any] = raw.get("paper_info") or {}
+        file_path = str(raw.get("file_path") or "")
+        path = Path(file_path) if file_path else None
+        file_size = path.stat().st_size if path and path.exists() else 0
+        is_pdf_header = bool(path and Downloader.validate_pdf(path))
+        is_pdf_deep = bool(path and Downloader.validate_pdf_deep(path))
+        page_count = PDFProcessor.get_page_count(path) if path and path.exists() else None
+        status = self._classify_status(
+            success=bool(raw.get("success")),
+            file_path=file_path,
+            file_size=file_size,
+            is_pdf_header=is_pdf_header,
+            is_pdf_deep=is_pdf_deep,
+            page_count=page_count,
+            error=str(raw.get("error") or ""),
+        )
 
-        pd_result = await download_paper_pdf(paper_title)
+        success = status in {"success_valid_pdf", "success_pdf_needs_review"}
+        return AutoDownloadResult(
+            paper_title=str(paper_info.get("title") or paper_title),
+            success=success,
+            file_path=file_path if success else "",
+            error="" if success else str(raw.get("error") or status),
+            retries_used=0,
+            source_channel=str(raw.get("engine_used") or ""),
+            status=status,
+            file_size=file_size,
+            page_count=page_count,
+            doi=str(paper_info.get("doi") or ""),
+            arxiv_id=str(paper_info.get("arxiv_id") or ""),
+        )
 
-        # 映射 PaperDownloader 的 DownloadResult 到 AutoPaper 的 DownloadResult
-        if pd_result.status in (DownloadStatus.SUCCESS, DownloadStatus.CACHED):
-            return AutoDownloadResult(
-                paper_title=pd_result.paper.title or paper_title,
-                success=True,
-                file_path=str(pd_result.pdf_path) if pd_result.pdf_path else "",
-                retries_used=0,
-                source_channel=pd_result.paper.provider.value,
-            )
-        else:
-            return AutoDownloadResult(
-                paper_title=paper_title,
-                success=False,
-                error=pd_result.error_message or f"下载失败: {pd_result.status.value}",
-                retries_used=0,
-            )
+    @staticmethod
+    def _classify_status(
+        *,
+        success: bool,
+        file_path: str,
+        file_size: int,
+        is_pdf_header: bool,
+        is_pdf_deep: bool,
+        page_count: int | None,
+        error: str,
+    ) -> str:
+        if success and file_path and is_pdf_header and is_pdf_deep and (page_count or 0) > 0:
+            return "success_valid_pdf"
+        if success and file_path and is_pdf_header:
+            return "success_pdf_needs_review"
+        if success and file_path and not is_pdf_header:
+            return "invalid_download_not_pdf"
+        if "标题不匹配" in error or "not match" in error.lower():
+            return "title_mismatch"
+        if "未找到" in error or "not found" in error.lower():
+            return "not_found"
+        if "403" in error or "401" in error or "paywall" in error.lower() or "access" in error.lower():
+            return "access_limited_or_paywalled"
+        if "timeout" in error.lower() or "timed out" in error.lower():
+            return "network_timeout"
+        if "429" in error or "too many requests" in error.lower() or "rate limit" in error.lower():
+            return "rate_limited"
+        if file_size == 0 and file_path:
+            return "empty_file"
+        return "failed_needs_review"
