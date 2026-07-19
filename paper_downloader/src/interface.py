@@ -43,28 +43,31 @@ from paper_downloader.src.exceptions import (
 
 # ── 全局单例 ──────────────────────────────────────────────────────
 
-_downloader: Optional[PaperDownloader] = None
+_downloaders: dict[tuple[str, ...], PaperDownloader] = {}
 
 
 def _get_downloader(engine: str = "auto", timeout: int = 30) -> PaperDownloader:
     """获取或创建全局下载器实例。"""
-    global _downloader
-    if _downloader is None:
-        # 始终加载所有引擎，搜索时按需选择
-        _downloader = PaperDownloader(
-            engines=["arxiv", "openalex", "semantic_scholar", "crossref", "google_scholar"],
+    engines = _resolve_engines(engine)
+    key = tuple(engines)
+    if key not in _downloaders:
+        _downloaders[key] = PaperDownloader(
+            engines=engines,
             max_downloads=3,
         )
-    _downloader._config.setdefault("timeout", {})["search"] = timeout
-    _downloader._config.setdefault("timeout", {})["download"] = timeout * 2
-    return _downloader
+    downloader = _downloaders[key]
+    _apply_runtime_api_settings(downloader)
+    downloader._config.setdefault("timeout", {})["search"] = timeout
+    downloader._config.setdefault("timeout", {})["download"] = timeout * 2
+    return downloader
 
 
 def _resolve_engines(engine: str) -> List[str]:
     """解析引擎选择到引擎列表。
 
     Args:
-        engine: "arxiv" | "openalex" | "semantic_scholar" | "crossref" | "scholar" | "auto"
+        engine: "arxiv" | "openalex" | "semantic_scholar" | "crossref" |
+                "scholar" | "academic_oa" | "auto"
 
     Returns:
         引擎名称列表。auto 按优先级尝试所有已注册引擎。
@@ -75,9 +78,40 @@ def _resolve_engines(engine: str) -> List[str]:
         "scholar": ["google_scholar"],
         "openalex": ["openalex"],
         "semantic_scholar": ["semantic_scholar"],
+        # Competition-friendly mode: stable academic APIs plus OA PDF sources,
+        # without Google Scholar's optional dependency and scraping limits.
+        "academic_oa": ["arxiv", "openalex", "semantic_scholar", "crossref"],
         "auto":    ["arxiv", "openalex", "semantic_scholar", "crossref", "google_scholar"],
     }
     return engine_map.get(engine, engine_map["auto"])
+
+
+def _apply_runtime_api_settings(downloader: PaperDownloader) -> None:
+    """Load optional API settings without requiring them for local tests."""
+    semantic_key = _read_key("semantic_scholar") or os.environ.get("SEMANTIC_SCHOLAR_API_KEY", "")
+    if semantic_key:
+        downloader._config.setdefault("semantic_scholar", {})["api_key"] = semantic_key
+
+    contact_email = (
+        _read_key("contact_email")
+        or os.environ.get("OPENALEX_EMAIL", "")
+        or os.environ.get("CONTACT_EMAIL", "")
+    )
+    if contact_email:
+        downloader._config["contact_email"] = contact_email
+
+
+def _read_key(name: str) -> str:
+    try:
+        import json
+
+        key_path = Path(__file__).resolve().parents[2] / "API_key" / "API_key.json"
+        if not key_path.exists():
+            return ""
+        data = json.loads(key_path.read_text(encoding="utf-8"))
+        return str(data.get(name) or "")
+    except Exception:
+        return ""
 
 
 # ── 公共 API ──────────────────────────────────────────────────────
